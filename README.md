@@ -523,3 +523,107 @@ const onToggleTodo = async () => {
 >
 > En nuestro caso lo utilizamos de la siguiente forma:
 > `const [todoOptimistic, toggleTodoOptimistic] = useOptimistic(todo);`
+
+## Revalidation de la data
+
+Si bien next maneja bastante bien el cache, el problema radica cuando tenemos data muy dinámica por ejemplo en nuestro todos que varios usuarios puedan actualizar los todos.
+
+Para solventar esa problemática vamos a utilizar lo siguiente: [Route Segment Config](https://nextjs.org/docs/app/api-reference/file-conventions/route-segment-config)
+
+Nota: esto es lo que tenemos que utilizar en el caso de NO estar trabajando con el `fetch()`.
+> [!IMPORTANTE ]
+>
+> Esta configuración solo funciona para PAGE, LAYOUT O ROUTE HANDLER.
+>
+
+
+1. De la documentación las options que nos interesan son 2 para poder crear una ruta 100% dinámica: `dynamic` y `revalidate`.
+
+Dynamic
+
+```js
+export const dynamic = "auto";
+// 'auto' | 'force-dynamic' | 'error' | 'force-static'
+```
+
+Valores:
+
+- auto : configuración por defecto.
+- force-dynamic : esta opción fuerza a que se haga una renderizan dinámica. En caso de trabajar con fetch() podemos hacer esta configuración => ` { cache: 'no-store', next: { revalidate: 0 } }`.
+
+Revalidate
+
+```js
+export const revalidate = false;
+// false | 0 | number
+```
+
+- false : configuration por defecto.
+- 0 : esto asegura que siempre la pagina sea revalidada.
+- number
+- Infinity : configuration para que no sea revalidada nunca.
+
+2. En la carpeta server-todos vamos a trabajar sobre la page.tsx y vamos a implementar el `dynamic` y el `revalidate`
+
+En la page de server todos:
+
+```js
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+import { NewTodo } from "@/components";
+import prisma from "@/lib/prisma";
+import TodosGrid from "@/todos/components/TodosGrid";
+
+export const metadata = {
+  title: "Server: Listado de Todos",
+  description: "SEO Title",
+};
+
+export default async function ServerTodosPage() {
+  const todos = await prisma.todo.findMany({
+    orderBy: { description: "asc" },
+  });
+
+  return (
+    <>
+      <span className="text-3xl mb-10">Server Actions</span>
+      <div className="w-full px-3 mx-5 mb-5">
+        <NewTodo />
+      </div>
+      <TodosGrid todos={todos} />
+    </>
+  );
+}
+```
+
+También vamos a implementarlo en rest-todo:
+
+```js
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+import { NewTodo } from "@/components";
+import prisma from "@/lib/prisma";
+import TodosGrid from "@/todos/components/TodosGrid";
+
+export const metadata = {
+  title: "Listado de Todos",
+  description: "SEO Title",
+};
+
+export default async function RestTodosPage() {
+  const todos = await prisma.todo.findMany({
+    orderBy: { description: "asc" },
+  });
+
+  return (
+    <div>
+      <div className="w-full px-3 mx-5 mb-5">
+        <NewTodo />
+      </div>
+      <TodosGrid todos={todos} />
+    </div>
+  );
+}
+```

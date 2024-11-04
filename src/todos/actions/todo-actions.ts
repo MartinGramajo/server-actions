@@ -32,3 +32,44 @@ export const toggleTodo = async (
 
   return updatedTodo;
 };
+
+export const addTodo = async (description: string) => {
+  try {
+    const todo = await prisma.todo.create({ data: { description } });
+    revalidatePath("/dashboard/server-todos");
+    return todo;
+  } catch (error) {
+    return {
+      message: "Error creando todo",
+    };
+  }
+};
+
+export const deleteCompleted = async (): Promise<void> => {
+  try {
+    const todo = await prisma.todo.deleteMany({
+      where: { complete: true },
+    });
+    revalidatePath("/dashboard/server-todos");
+  } catch (error) {}
+};
+
+
+export const refreshCompleted = async ()=>{
+    await prisma.todo.deleteMany(); 
+    await prisma.todo.createMany({
+      data:[
+          {description:'Piedra del alma', complete: true},
+          {description:'Piedra del poder'},
+          {description:'Piedra del tiempo'},  
+          {description:'Piedra del espacio'},
+          {description:'Piedra del realidad'}
+      ]
+    })
+
+    revalidatePath("/dashboard/server-todos");
+    return {
+      message: "Seed Executed",
+    };
+
+}

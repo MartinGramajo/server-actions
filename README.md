@@ -194,3 +194,129 @@ export const toggleTodo = async (
   return updatedTodo;
 };
 ```
+
+## Crear un nuevo Todo (server actions)
+
+La idea en este caso es mandar a llamar al server actions dentro de nuestro onSubmit en el componente NewTodo.jsx.
+
+Esto es lo que vamos a reemplazar por nuestra server actions
+
+```js
+export const NewTodo = () => {
+  const [description, setDescription] = useState("");
+  const router = useRouter();
+
+  const onSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (description.trim().length === 0) return;
+    await todosApi.createTodo(description);
+    setDescription("");
+    router.refresh();
+  };
+};
+```
+
+Formas de trabajar la mutación de la data
+
+- [En esta forma le deja toda la validation al backend](https://nextjs.org/learn/dashboard-app/mutating-data)
+
+- [En esta forma utilizamos los server actions](https://nextjs.org/docs/app/building-your-application/data-fetching/server-actions-and-mutations)
+
+##### Implementing de clase
+
+1. Crear el código para crear un todo: El cual es el mismo código para un POST
+
+```js
+try {
+  const { complete, description } = await postSchema.validate(
+    await request.json()
+  );
+  const todo = await prisma.todo.create({ data: { complete, description } });
+  return NextResponse.json(todo);
+} catch (error) {
+  return NextResponse.json({ message: error }, { status: 400 });
+}
+```
+
+2. En todo-actions.ts, adaptamos todo el código del punto 1, en nuestro server actions
+
+```js
+export const addTodo = async (description: string) => {
+  try {
+    const todo = await prisma.todo.create({ data: { description } });
+    revalidatePath("/dashboard/server-todos");
+    return todo;
+  } catch (error) {
+    return {
+      message: "Error creando todo",
+    };
+  }
+};
+```
+
+3. Lo utilizamos en el component NewTodo.tsx:
+
+```js
+const onSubmit = async (e: FormEvent) => {
+  e.preventDefault();
+  if (description.trim().length === 0) return;
+  await addTodo(description);
+  setDescription("");
+  // router.refresh();
+};
+```
+
+## Eliminar Todo (server actions)
+
+1. Crear el código para un DELETE: tenemos que adaptar el código de nuestra carpeta api en nuestro server actions:
+
+Este bloque tenemos que adaptar en nuestro todo.actions.ts
+
+```js
+try {
+  const todo = await prisma.todo.deleteMany({
+    where: { complete: true },
+  });
+  return NextResponse.json("Borrados");
+} catch (error) {
+  return NextResponse.json({ message: error }, { status: 400 });
+}
+```
+
+2. Adaptamos en todo-actions.ts:
+
+```js
+export const deleteCompleted = async (): Promise<void> => {
+  try {
+    const todo = await prisma.todo.deleteMany({
+      where: { complete: true },
+    });
+    revalidatePath("/dashboard/server-todos");
+  } catch (error) {}
+};
+```
+
+3. Lo utilizamos en la función del formulario para borrar los completados, directamente lo utilizamos en el onClick()
+
+```js
+import { addTodo, deleteCompleted } from "@/todos/actions/todo-actions";
+
+<button
+  onClick={() => deleteCompleted()}
+  type="button"
+  className="flex items-center justify-center rounded ml-2 bg-red-400 p-2 text-white hover:bg-red-700 transition-all"
+>
+  <IoTrashOutline />
+  <span className="ml-2 text-text-sm">Borrar completados</span>
+</button>;
+```
+
+> [!IMPORTANTE ]
+>
+> La forma de llamar a nuestro server actions tiene que ser la siguiente: 
+>
+>  onClick={() => deleteCompleted()} // ESTA FORMA LO HACEMOS PARA NO MANDAR NINGÚN ARGUMENTO.
+>
+> Esto se debe a que si lo enviamos de la siguiente forma onClick={deleteCompleted} nos tira un error
+>
+> Explicación:  hay objects que no son serializable, es decir, estamos enviando un object, una instancia del evento que tiene muchos methods y propiedades, el problema no radica en esos methods o propiedades sino en que que hay clases o prototipos que no son soportados. 

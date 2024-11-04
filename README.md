@@ -313,10 +313,213 @@ import { addTodo, deleteCompleted } from "@/todos/actions/todo-actions";
 
 > [!IMPORTANTE ]
 >
-> La forma de llamar a nuestro server actions tiene que ser la siguiente: 
+> La forma de llamar a nuestro server actions tiene que ser la siguiente:
 >
->  onClick={() => deleteCompleted()} // ESTA FORMA LO HACEMOS PARA NO MANDAR NINGÚN ARGUMENTO.
+> onClick={() => deleteCompleted()} // ESTA FORMA LO HACEMOS PARA NO MANDAR NINGÚN ARGUMENTO.
 >
 > Esto se debe a que si lo enviamos de la siguiente forma onClick={deleteCompleted} nos tira un error
 >
-> Explicación:  hay objects que no son serializable, es decir, estamos enviando un object, una instancia del evento que tiene muchos methods y propiedades, el problema no radica en esos methods o propiedades sino en que que hay clases o prototipos que no son soportados. 
+> Explicación: hay objects que no son serializable, es decir, estamos enviando un object, una instancia del evento que tiene muchos methods y propiedades, el problema no radica en esos methods o propiedades sino en que que hay clases o prototipos que no son soportados.
+
+## useOptimistic Hook - React
+
+Todavía nos queda aprender una técnica para mejorar la optimización visual de nuestra app, vamos a simular una demora con una function sleep() en nuestro server actions:
+
+```js
+"use server";
+
+import prisma from "@/lib/prisma";
+import { Todo } from "@prisma/client";
+import { revalidatePath } from "next/cache";
+
+// function para simular demoras en la respuesta
+export const sleep = async (seconds: number) => {
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      resolve(true);
+    }, seconds * 1000);
+  });
+};
+
+export const toggleTodo = async (
+  id: string,
+  complete: boolean
+): Promise<Todo> => {
+  // * vamos a simular una demora en la petición
+  await sleep(3);
+  // 1. Buscamos el todo
+  const todo = await prisma.todo.findFirst({
+    where: {
+      id,
+    },
+  });
+  // 2. Verificamos que el todo exista
+  if (!todo) {
+    throw `Todo con id ${id} no encontrado`;
+  }
+  // 3. Actualizamos el todo
+  const updatedTodo = await prisma.todo.update({
+    where: { id },
+    data: { complete },
+  });
+  // 4. Revalidate por el path para actualizar unicamente lo que  cambio
+  revalidatePath("/dashboard/server-todos");
+  return updatedTodo;
+};
+```
+
+1. En el component TodoItem.tsx vamos a hacer una importación de React para poder utilizar el hook.
+
+```js
+import { useOptimistic } from "react";
+```
+
+2. Creamos el hook
+
+```js
+const [todoOptimistic, toggleTodoOptimistic] = useOptimistic(todo);
+```
+
+3. Ahora si queremos utilizar nuestro todo tendríamos que utilizar nuestro nuevo inicial state => todoOptimistic, en lugar de todo.
+
+```js
+"use client";
+import { useOptimistic } from "react";
+import { Todo } from "@prisma/client";
+import styles from "./TodoItem.module.css";
+import { IoCheckboxOutline, IoSquareOutline } from "react-icons/io5";
+
+interface Props {
+  todo: Todo;
+  // TODO: Acciones que quiero llamar
+  toggleTodo: (id: string, complete: boolean) => Promise<Todo | void>;
+}
+
+const TodoItem = ({ todo, toggleTodo }: Props) => {
+  // crear el hook
+  const [todoOptimistic, toggleTodoOptimistic] = useOptimistic(todo);
+
+  return (
+    <div
+      className={todoOptimistic.complete ? styles.todoDone : styles.todoPending}
+    >
+      <div className="flex flex-col sm:flex-row justify-start items-center gap-4 ">
+        <div
+          onClick={() =>
+            toggleTodo(todoOptimistic.id, !todoOptimistic.complete)
+          }
+          className={`
+            flex p-2 rounded-md cursor-pointer 
+            hover:bg-opacity-60 
+            ${todoOptimistic.complete ? "bg-blue-100" : "bg-red-100"}
+            `}
+        >
+          {todoOptimistic.complete ? (
+            <IoCheckboxOutline size={30} />
+          ) : (
+            <IoSquareOutline size={30} />
+          )}
+        </div>
+        <div className="text-center sm:text-left">
+          {todoOptimistic.description}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default TodoItem;
+```
+
+4. Para hacer el proceso que haga el cambio visual, tenemos que ver en que momento vamos a llamar nuestro `toggleTodoOptimistic`.
+
+Como segundo argumento mandamos un callback con dos argumentos: el state y el argumento que nosotros utilicemos en este caso vamos a mandar el newCompleteValue de tipo boolean.
+
+```js
+     const [todoOptimistic, toggleTodoOptimistic] = useOptimistic(
+      todo,
+      (state, newCompleteValue: boolean)=>()
+    );
+
+```
+
+Ahora tenemos que retornar un nuevo estado que seria un todo y el nuevo valor del complete. No es mas que una simple function para cambiar el todo que tenemos de valor inicial pero optimizado de manera visual:
+
+```js
+const [todoOptimistic, toggleTodoOptimistic] = useOptimistic(
+  todo,
+  (state, newCompleteValue: boolean) => ({
+    ...state,
+    complete: newCompleteValue,
+  })
+);
+```
+
+5. Armamos la función onToggleTodo()
+
+```js
+const onToggleTodo = async () => {
+  try {
+    toggleTodoOptimistic(!todoOptimistic.complete);
+    await toggleTodo(todoOptimistic.id, !todoOptimistic.complete);
+  } catch (error) {
+    toggleTodoOptimistic(!todoOptimistic.complete);
+  }
+};
+```
+
+6. La utilizamos en el componente:
+
+```js
+ return (
+    <div
+      className={todoOptimistic.complete ? styles.todoDone : styles.todoPending}
+    >
+      <div className="flex flex-col sm:flex-row justify-start items-center gap-4 ">
+        <div
+          // onClick={() =>
+          //   toggleTodo(todoOptimistic.id, !todoOptimistic.complete)
+          // }
+          onClick={ onToggleTodo}
+          className={`
+            flex p-2 rounded-md cursor-pointer
+            hover:bg-opacity-60
+            ${todoOptimistic.complete ? "bg-blue-100" : "bg-red-100"}
+            `}
+        >
+          {todoOptimistic.complete ? (
+            <IoCheckboxOutline size={30} />
+          ) : (
+            <IoSquareOutline size={30} />
+          )}
+        </div>
+        <div className="text-center sm:text-left">
+          {todoOptimistic.description}
+        </div>
+      </div>
+    </div>
+  );
+};
+```
+
+7. Para solucionar el error que aparece en consola tenemos que utilizar el toggleTodoOptimistic con el startTransition(), este ultimo lo debemos importar de react:
+
+```js
+const onToggleTodo = async () => {
+  try {
+    startTransition(() => toggleTodoOptimistic(!todoOptimistic.complete));
+
+    await toggleTodo(todoOptimistic.id, !todoOptimistic.complete);
+  } catch (error) {
+    startTransition(() => toggleTodoOptimistic(!todoOptimistic.complete));
+  }
+};
+```
+
+> [!NOTAS ]
+>
+> El hook se parece muchísimo a useState: porque tiene un estado inicial y una función o dispatch para actualizar.
+> const [optimisticTodo, setOptimisticTodo] = useOptimistic(todo);
+>
+> En nuestro caso lo utilizamos de la siguiente forma:
+> `const [todoOptimistic, toggleTodoOptimistic] = useOptimistic(todo);`
